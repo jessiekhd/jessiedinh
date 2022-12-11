@@ -1,0 +1,544 @@
+---
+title: "R Notebook"
+output: html_notebook
+FINAL PROJECT
+---
+
+
+```{r}
+# set the working directory
+knitr::opts_knit$set(root.dir = "C:/Users/jessi/Desktop/DataMining/zFinal")
+```
+
+```{r}
+# load libraries
+library(GGally)
+library(dplyr)
+install.packages("caret", dependencies = TRUE)
+set.seed(1243)
+
+```
+
+```{r}
+# load dataset
+kchouse = read.csv("kchouse.csv")
+
+```
+
+Exploratory Data Analysis
+
+  
+```{r}
+summary(kchouse)
+```
+
+
+```{r}
+#avg price of bedroom
+kchouse %>%
+  group_by(bedrooms) %>%
+  summarise(avgprice = mean(price)) %>%
+  arrange(avgprice)
+
+```
+```{r}
+#plot bedrooms and price
+ggplot(data = kchouse, 
+       mapping= aes(x= factor(bedrooms), y=price))+geom_boxplot()
+
+```
+
+```{r}
+str(kchouse)
+```
+```{r}
+#data trasnformation
+#FORMAT ID column
+format(kchouse$id, scientific = FALSE)
+kchouse$id %>% head()
+```
+                    
+
+```{r}
+#condition count
+kchouse %>% select(id, condition, price) %>%
+            distinct() %>%
+            count(condition)
+```
+```{r}
+#top 5 grade
+
+top5_grade = kchouse %>% select(id, grade, price) %>%
+            distinct() %>%
+            count(grade) %>% 
+            top_n(5)%>%
+            arrange(desc(n)) %>%
+            pull(grade)
+```
+```{r}
+#yr built and count
+kchouse %>% select(id, yr_built, price) %>% 
+            filter(yr_built >= 2004) %>%
+            distinct() %>%
+            count(yr_built)
+```
+
+```{r}
+# Count the houses in top 5 and their yr_renovated info
+kchouse %>% 
+  select(id, grade, price, yr_renovated) %>%
+  filter(grade %in% top5_grade) %>%
+  count(yr_renovated, grade) # I realize that a large population of the best graded houses have missing values for yr_renovated -> therefore i wont be using the yr_renovated column
+```
+```{r}
+#Bedrooms and count
+top_bed  = kchouse %>% select(id, bedrooms, price, yr_built) %>%
+            distinct() %>%
+            count(bedrooms) %>% 
+            
+            arrange(desc(n))
+
+top_bed  
+
+```
+
+
+```{r}
+#is there a trend in the number of bedrooms built over the year?
+
+kchouse %>% 
+  select(yr_built, id, bedrooms, grade)%>%
+  filter(grade %in% top5_grade & 
+        bedrooms %in% c(1,2,3,4,5,6) &
+          yr_built > 1940) %>%
+  count(bedrooms, yr_built) %>%
+ ggplot(aes(x= yr_built, y=n, color=factor(bedrooms)))+ geom_line() +ggtitle("Trebds in bedrooms")
+ 
+```
+```{r}
+# count of bathrooms
+
+kchouse %>% select(id, bathrooms, price) %>% 
+            distinct() %>%
+            count(bathrooms) %>% arrange(desc(n))
+```
+```{r}
+#is there a trend in bathrooms over the year?
+
+kchouse %>% 
+  select(yr_built, id, bathrooms, grade)%>%
+  filter(grade %in% top5_grade & 
+        bathrooms %in% c(2.50, 1.00, 1.75, 2.25, 2.00, 1.50, 2.75,3,4,5) &
+          yr_built > 1940) %>%
+  count(bathrooms, yr_built) %>%
+ ggplot(aes(x= yr_built, y=n, color=factor(bathrooms)))+ geom_line() 
+ 
+```
+
+
+```{r}
+#view and count
+kchouse %>% select(id, view, price) %>% 
+            distinct() %>%
+            count(view) %>% arrange(desc(n))
+```
+
+```{r}
+#data trasnformation
+#create a binary variable is_view 
+kchouse = kchouse %>% 
+  mutate(is_view = if_else( view > 0, 1, 0))
+
+```
+
+```{r}
+#waterfront and count
+kchouse %>% select(id, waterfront, price) %>% 
+            distinct() %>%
+            count(waterfront) %>% arrange(desc(n))
+
+
+#factorize waterfront
+kchouse$waterfront = factor(kchouse$waterfront)
+```
+
+##plots of varibles
+```{r}
+#Ploot of price, bedrooms, bathrooms, sqftliving, waterfront
+plot1 = select(kchouse, price, bedrooms, bathrooms, sqft_living, factor(waterfront)) 
+ggpairs(plot1, mapping = aes(color = factor(waterfront), alpha = 0.5)) 
+
+
+```
+```{r}
+#plot of price, sqftlot, is_view, condition, grade, yr_built
+plot2 = select(kchouse,price, sqft_lot, is_view, condition, grade, yr_built)
+ggpairs(plot2, mapping = aes(color = is_view, alpha = 0.5)) 
+```
+
+
+
+```{r}
+#turn off scientific notion
+options(scipen=999)
+```
+
+
+```{r}
+#plot of number of price and grade and condition 
+ggplot(data=df) +
+        geom_point(mapping= aes(x=factor(condition), y= price, color=factor(grade)))
+```
+A.CREATEING 2 SUPERVISED LEARNING MODELS
+
+#Filter data
+
+
+```{r}
+#create a new dataframe called df 
+df = kchouse %>% select( price:sqft_living, sqft_lot,condition, grade, sqft_living15, sqft_lot15)
+```
+
+```{r}
+
+df = df %>% filter(
+                   bedrooms %in% c(1,2,3,4,5,6) &
+                   bathrooms %in% c(1.00, 1.50, 1.75, 2.00, 2.25, 2.50, 2.75, 3.00, 3.25, 3.50, 3.75, 4.00, 4.50) &
+                   grade %in% c(6,7,8,9,10) &
+                   condition %in% c(3,4,5)
+                   )
+df
+```
+
+
+##Preprocessing
+```{r}
+library(caret)
+```
+
+```{r}
+#train set and test set split
+
+in_train = createDataPartition(y = df$price,
+                               p = 0.8,
+                               list = FALSE)
+df_train = df[in_train, ]
+df_test = df[-in_train, ]
+
+```
+
+```{r}
+# identify near zero variance of each column
+nearZeroVar(df_train_proc, saveMetrics = TRUE)
+```
+```{r}
+#center, scaling
+# remove near-zero variance columns
+preprocessing_steps = preProcess(select(df, price, sqft_living, sqft_lot, sqft_living15, sqft_lot15),
+                                 method = c('center', 'scale', 'nzv'))
+
+df_train_proc = predict(preprocessing_steps, newdata=df_train)
+df_test_proc = predict(preprocessing_steps, newdata=df_test)  # it retains the mean/std from the previous step
+
+# check the results
+head(df_train_proc)
+```
+```{r}
+#dimension of datasets
+dim(df_train)
+dim(df_test)
+```
+
+MODEL 1: Multivariate Model
+
+##train
+```{r}
+#Multivariate regression model
+multi_model = lm(formula = price ~ ., data= df_train_proc)
+
+summary(multi_model)
+
+```
+```{r}
+#coefficients of the model
+multi_model$coefficients
+```
+
+##predict
+
+```{r}
+# predict function
+predict_multi = predict(multi_model, newdata= df_test_proc)
+head(predict_multi)
+```
+
+```{r}
+# prediction metrics
+postResample(pred = predict_multi, obs = df_test_proc$price)
+```
+##errors
+```{r}
+# calculate the errors for each row
+errors_multi = data.frame(pred1 =predict_multi,
+                        observed1 = df_test_proc$price,
+                        error1 = predict_multi - df_test_proc$price)
+#mae
+mean(abs(errors_multi$error1))
+```
+##visualization
+
+```{r}
+multidf<- data.frame(
+  resid = residuals(multi_model),
+  pred= predict(multi_model))
+```
+
+```{r}
+#plot the absolute residuals versus the predicted values 
+ggplot(multidf, aes(x=pred, y=abs(resid))) + geom_point() + geom_smooth() +ggtitle ("Multi Model: Absolute residuals vs Predicted Values")
+
+```
+```{r}
+# visualize the (dis)agreement between predicted and observed
+ggplot(data = errors_multi, aes(x = predict_multi, y = observed1)) + 
+  geom_point() + 
+  geom_abline(intercept = 0, slope = 1, color = 'red') + ggtitle("Multi model: Predicted values vs Observed values") # why 0 intercept and 1 slope?
+```
+
+Model 2: FIT MODEL
+
+##train
+```{r}
+#create a FIT model & applying feature engineering
+fit_model  = train(price~.,
+                  data = df_train_proc,
+                  method = 'lm', 
+                  trControl = trainControl(method = 'cv', number = 10), metric = "RSME")
+
+fit_model
+```
+
+```{r}
+#average parameter values after 10 fold CV
+fit_model$finalModel
+```
+
+
+```{r}
+#summarize model
+summary(fit_model)
+```
+##predict
+```{r}
+#Measuring predictive accuracy with test set
+# predict function
+predict_fit = predict(fit_model,
+               newdata =df_test_proc)  
+
+# predicted target values
+head(predict_fit)
+```
+```{r}
+# calculate metrics by comparing prediction vs observation
+postResample(pred =predict_fit, obs =df_test_proc$price)
+```
+
+```{r}
+# calculate the errors for each row
+errors_fit = data.frame(pred =predict_fit,
+                        observed = df_test_proc$price,
+                        error = predict_fit - df_test_proc$price)
+                        
+tail(errors_fit)
+```
+```{r}
+#mae
+mean(abs(errors_fit$error))
+```     
+##visualizations:
+
+```{r}
+fitdf<- data.frame(
+  resid2 = residuals(fit_model),
+  pred2= predict(fit_model))
+```
+
+```{r}
+#plot the absolute residuals versus the predicted values 
+ggplot(fitdf, aes(x=pred2, y=abs(resid2))) + geom_point() + geom_smooth() +ggtitle ("Fit Model: Absolute residuals vs Predicted Values")
+
+```
+
+```{r}
+#visualize the correlation between predicted and observed
+ggplot(data = errors_fit, aes(x=predict_fit, y = observed)) +
+  geom_point() +
+  geom_abline(intercept = 0,
+              slope=1,
+              color= "red") + ggtitle("Fit Model: Predicted values vs. Observed values")
+
+```
+
+
+MODEL 2: UNSUPERVISED LEARNING
+
+```{r}
+#Create a new variable called is_expensive
+kchouse = kchouse %>% 
+  mutate(is_expensive = if_else( price > 1000000, 1, 0))
+
+#count of houses that priced over 1M 
+kchouse %>% select(id, is_expensive, price) %>% 
+            count(is_expensive) %>% arrange(desc(n))
+```
+
+```{r}
+library(arules)
+```
+
+```{r}
+#create a new dataframe called df2
+df2= kchouse %>% select( price:sqft_living, sqft_lot,condition, grade, sqft_living15, sqft_lot15, yr_built,is_view, waterfront, is_expensive)
+
+df2= df2 %>% filter(yr_built>1970 &
+                   bedrooms %in% c(1,2,3,4,5,6) &
+                   bathrooms %in% c(1.00, 1.50, 1.75, 2.00, 2.25, 2.50, 2.75, 3.00, 3.25, 3.50, 3.75, 4.00, 4.50) &
+                   grade %in% c(6,7,8,9,10) &
+                   condition %in% c(3,4,5)
+                   )
+df2
+```
+
+```{r}
+#factorize
+df2$bedrooms=factor(df2$bedrooms)
+df2$bathrooms=factor(df2$bathrooms)
+df2$condition=factor(df2$condition)
+df2$grade=factor(df2$grade)
+df2$waterfront=factor(df2$waterfront)
+
+```
+
+
+```{r}
+#discretize sqft_living
+df2$living_quartiles = discretize(df2$sqft_living, 
+             method= "frequency",  
+             breaks = 4,
+              labels= c("living_Q1",
+                       "living_Q2",
+                         "living_Q3",
+                         "living_Q4"))
+
+
+#discretize sqft_lot
+df2$lot_quartiles = discretize(df2$sqft_lot,
+                                method= "frequency",
+                                      breaks = 4,
+                                      labels= c("lot_Q1",
+                                                "lot_Q2",
+                                                "lot_Q3",
+                                                "lot_Q4"                                               ))
+
+#discretize price
+df2$price_quartiles = discretize(df2$price, 
+                                   method= "frequency",
+                                      breaks = 4,
+                                      labels= c("pr_Q1",
+                                                "pr_Q2",
+                                                "pr_Q3",
+                                                "pr_Q4"
+                                               ))
+
+df2
+                         
+```
+
+```{r}
+#summary of items in each category
+table (df2$living_quartiles)
+table(df2$lot_quartiles)
+table(df2$yr_quartiles)
+table(df2$price_quartiles)
+```
+
+
+Association Mining Analysis
+```{r}
+#select features
+house_ft= df2  %>%     select(bedrooms,
+                                 bathrooms, 
+                                 condition,
+                                 grade,
+                                 living_quartiles,
+                                 lot_quartiles,
+                                 price_quartiles,
+                                 is_view,
+                                 waterfront, is_expensive
+                             )
+                                 
+# create a 'transactions' object
+house_transaction = as(house_ft, "transactions") # as: force an object become a class
+
+# view the itemsets
+inspect(house_transaction[1:3])
+
+```
+
+```{r}
+# plot the most frequent items
+itemFrequencyPlot(house_transaction, topN = 10, type="absolute", main="Item Frequency")
+```
+
+```{r}
+# run the apriori algorithm
+rules = apriori(house_transaction,
+                parameter = list(sup = 0.01, # each item needs to be at least 1 % of the pop to be considered
+                                 conf = 0.6,
+                                 target = "rules"))  
+
+summary(rules)
+```
+
+```{r}
+
+items(rules)
+
+inspect(head(rules))
+
+```
+
+```{r}
+#sort rule by a subset
+expensive_houses = subset(rules,  subset = rhs %in% "price_quartiles=pr_Q4" & lift > 1)
+inspect(head(expensive_houses, n =7, by = "lift"))
+
+```
+[1] 4 bedrooms, 2.5 bath, grade=10
+
+
+```{r}
+#Average price of price Q4
+
+avg = df2 %>% na.omit() %>% group_by(price_quartiles) %>%
+  summarize(avg_price = mean(price, na.rm = TRUE))
+avg
+```
+
+```{r}
+#Average lot size of Lot Q4
+
+avg = df2 %>% na.omit() %>% group_by(lot_quartiles) %>%
+  summarize(avg_area = mean(sqft_lot, na.rm = TRUE))
+avg
+```
+
+```{r}
+#Average of living size of Living Q4
+
+avg = df2 %>% na.omit() %>% group_by(living_quartiles) %>%
+  summarize(avg_area = mean(sqft_living, 
+                        na.rm = TRUE))
+avg
+
+```
